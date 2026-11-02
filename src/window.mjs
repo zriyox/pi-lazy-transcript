@@ -18,6 +18,43 @@ const __fs = fs;
  *  - 只有滚动到顶才增长，所以正常工作时帧成本恒定 = O(window)。
  */
 
+/** Rough terminal display width: CJK, Hangul and emoji count as 2 columns. */
+export function displayWidth(text) {
+  let width = 0;
+  for (const ch of String(text)) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp === 0x200d || (cp >= 0x300 && cp <= 0x36f)) continue; // ZWJ / combining marks
+    const wide =
+      (cp >= 0x1100 && cp <= 0x115f) ||
+      (cp >= 0x2e80 && cp <= 0xa4cf) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe30 && cp <= 0xfe6f) ||
+      (cp >= 0xff00 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x1f300 && cp <= 0x1faff);
+    width += wide ? 2 : 1;
+  }
+  return width;
+}
+
+/** Hard-truncate to `max` display columns, appending an ellipsis when cut. */
+export function truncateToWidth(text, max) {
+  const source = String(text);
+  if (displayWidth(source) <= max) return source;
+  let out = "";
+  let used = 0;
+  const ellipsis = "…";
+  const budget = max - displayWidth(ellipsis);
+  for (const ch of source) {
+    const w = displayWidth(ch);
+    if (used + w > budget) break;
+    out += ch;
+    used += w;
+  }
+  return out + ellipsis;
+}
+
 /** Marker component shown in place of the hidden history. */
 export class CollapsedMarker {
   constructor(hiddenCount) {
@@ -26,9 +63,11 @@ export class CollapsedMarker {
 
   render(width) {
     const n = this.hiddenCount;
-    const label = `⋯ 已折叠 ${n} 条更早消息 · 滑到顶部继续加载（/lazy reset 收起）`;
     const max = Math.max(8, width - 1);
-    return [label.length > max ? label.slice(0, max) + "…" : label];
+    const full = `⋯ 已折叠 ${n} 条更早消息 · 滑到顶部继续加载（/lazy reset 收起）`;
+    const short = `⋯ 已折叠 ${n} 条更早消息`;
+    const label = displayWidth(full) <= max ? full : short;
+    return [truncateToWidth(label, max)];
   }
 
   invalidate() {}
@@ -53,7 +92,6 @@ export function patchContainerRender(origRender, getState, ownerKey = "__piLazyI
     if (!Array.isArray(children) || self.entries !== undefined) return origRender.call(self, width);
 
     const total = children.length;
-    maybeGrowWindow(state, total);
 
     const windowSize = Math.max(1, Math.floor(state.windowSize));
     const hidden = total - windowSize;
@@ -94,7 +132,10 @@ export function maybeGrowWindow(state, total, now = Date.now()) {
   const nearTop = Math.max(1, Math.round((scroll.viewportHeight || 0) * state.growNearTopViewports));
   if (scroll.scrollTop > nearTop) return false;
   if (state.windowSize >= total) return false;
-  if (now - (state.lastGrowAt ?? 0) < state.growIntervalMs) return false;
+  const moved = state.lastGrowScrollTop === undefined || state.scroll.scrollTop !== state.lastGrowScrollTop;
+  const minInterval = moved ? state.growIntervalMs : Math.max(state.growIntervalMs, 800);
+  if (now - (state.lastGrowAt ?? 0) < minInterval) return false;
+  state.lastGrowScrollTop = state.scroll.scrollTop;
   state.windowSize = Math.min(total, state.windowSize + state.chunk);
   state.lastGrowAt = now;
   dumpStats(state, { event: "grow", total });
@@ -111,6 +152,7 @@ export function createState(initial = {}) {
     growIntervalMs: initial.growIntervalMs ?? 120,
     growNearTopViewports: initial.growNearTopViewports ?? 1,
     lastGrowAt: 0,
+    lastGrowScrollTop: undefined,
     scroll: { scrollTop: 0, contentHeight: 0, viewportHeight: 0, sawEnd: false },
     stats: { frames: 0, lastHidden: 0, maxHidden: 0, grownTo: initial.windowSize ?? 60 },
   };
