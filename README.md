@@ -23,11 +23,17 @@ Single-run numbers on pi / pi-tui 1.5.0, Apple silicon; expect ±20% noise betwe
 ## Install
 
 ```bash
+# straight from GitHub (no npm publish needed)
+pi install git:github.com/zriyox/pi-lazy-transcript
+
 # from a local checkout
-pi install /path/to/pi-lazy-transcript
+pi install ./pi-lazy-transcript
 
 # or drop it into your user extensions directory
 cp -R pi-lazy-transcript ~/.pi/agent/extensions/
+
+# try it without touching settings
+pi -e git:github.com/zriyox/pi-lazy-transcript
 ```
 
 Restart pi. Enabled by default (window = 60 messages).
